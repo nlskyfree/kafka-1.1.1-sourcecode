@@ -491,7 +491,7 @@ public class Selector implements Selectable, AutoCloseable {
                     if (channel.ready())
                         sensors.successfulAuthentication.record();
                 }
-
+                // 从channel读数据
                 attemptRead(key, channel);
 
                 if (channel.hasBytesBuffered()) {

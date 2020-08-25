@@ -17,6 +17,7 @@ import org.ajoberstar.grgit.Grgit
 
 buildscript {
   repositories {
+  	mavenLocal()
     mavenCentral()
     jcenter()
   }
@@ -37,6 +38,7 @@ apply from: "$rootDir/gradle/dependencies.gradle"
 allprojects {
 
   repositories {
+  	mavenLocal()
     mavenCentral()
   }
   
