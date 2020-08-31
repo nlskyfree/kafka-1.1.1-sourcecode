@@ -263,7 +263,9 @@ public class Selector implements Selectable, AutoCloseable {
      * </p>
      */
     public void register(String id, SocketChannel socketChannel) throws IOException {
+        // 确保没有重复注册
         ensureNotRegistered(id);
+        // 创建kafkachannel并attach到selectkey上
         registerChannel(id, socketChannel, SelectionKey.OP_READ);
     }
 
@@ -419,7 +421,7 @@ public class Selector implements Selectable, AutoCloseable {
                 keysWithBufferedRead = new HashSet<>(); //poll() calls will repopulate if needed
                 pollSelectionKeys(toPoll, false, endSelect);
             }
-
+            // 遍历selectionKey处理IO读写事件，读完的数据放入stagedReceive。同时将KafkaChannel中的Send写出
             // Poll from channels where the underlying socket has more data
             pollSelectionKeys(readyKeys, false, endSelect);
             // Clear all selected keys so that they are included in the ready count for the next select
@@ -433,11 +435,11 @@ public class Selector implements Selectable, AutoCloseable {
 
         long endIo = time.nanoseconds();
         this.sensors.ioTime.record(endIo - endSelect, time.milliseconds());
-
+        // 处理空闲的连接，默认10min，超时的连接会被断开
         // we use the time at the end of select to ensure that we don't close any connections that
         // have just been processed in pollSelectionKeys
         maybeCloseOldestConnection(endSelect);
-
+        // 将stagedReceives中每个channel取一条NetworkReceives放入到CompletedReceived
         // Add to completedReceives after closing expired connections to avoid removing
         // channels with completed receives until all staged receives are completed.
         addToCompletedReceives();
@@ -453,12 +455,14 @@ public class Selector implements Selectable, AutoCloseable {
     void pollSelectionKeys(Set<SelectionKey> selectionKeys,
                            boolean isImmediatelyConnected,
                            long currentTimeNanos) {
+        // determineHandlingOrder对key集合做了shuffle，避免发生饥饿
         for (SelectionKey key : determineHandlingOrder(selectionKeys)) {
             KafkaChannel channel = channel(key);
             long channelStartTimeNanos = recordTimePerConnection ? time.nanoseconds() : 0;
 
             // register all per-connection metrics at once
             sensors.maybeRegisterConnectionMetrics(channel.id());
+            // 更新channel的过期时间
             if (idleExpiryManager != null)
                 idleExpiryManager.update(channel.id(), currentTimeNanos);
 
@@ -491,9 +495,9 @@ public class Selector implements Selectable, AutoCloseable {
                     if (channel.ready())
                         sensors.successfulAuthentication.record();
                 }
-                // 从channel读数据
+                // 从channel读数据到stagedReceive，若stagedReceive有数据，说明已形成完整Request，不再继续读
                 attemptRead(key, channel);
-
+                // 只有ssl通信时才可能为true
                 if (channel.hasBytesBuffered()) {
                     //this channel has bytes enqueued in intermediary buffers that we could not read
                     //(possibly because no memory). it may be the case that the underlying socket will
@@ -503,11 +507,12 @@ public class Selector implements Selectable, AutoCloseable {
                     //cleared to avoid the overhead of checking every time.
                     keysWithBufferedRead.add(key);
                 }
-
+                // 往channel写数据
                 /* if channel is ready write to any sockets that have space in their buffer and for which we have data */
                 if (channel.ready() && key.isWritable()) {
                     Send send = null;
                     try {
+                        // 将channel中的send发送出去，如果发送完成，则注销OP_WRITE事件
                         send = channel.write();
                     } catch (Exception e) {
                         sendFailed = true;
@@ -556,6 +561,7 @@ public class Selector implements Selectable, AutoCloseable {
         if (channel.ready() && (key.isReadable() || channel.hasBytesBuffered()) && !hasStagedReceive(channel)
             && !explicitlyMutedChannels.contains(channel)) {
             NetworkReceive networkReceive;
+            // channel.read返回不为null则代表读到一个完的Request
             while ((networkReceive = channel.read()) != null) {
                 madeReadProgressLastPoll = true;
                 addToStagedReceives(channel, networkReceive);
@@ -599,12 +605,12 @@ public class Selector implements Selectable, AutoCloseable {
         KafkaChannel channel = openOrClosingChannelOrFail(id);
         mute(channel);
     }
-
+    // 不再从该channel读取数据（说明该channel上有request正在处理）
     private void mute(KafkaChannel channel) {
         channel.mute();
         explicitlyMutedChannels.add(channel);
     }
-
+    // 重新监听该channel，读数据
     @Override
     public void unmute(String id) {
         KafkaChannel channel = openOrClosingChannelOrFail(id);
@@ -848,6 +854,7 @@ public class Selector implements Selectable, AutoCloseable {
                 KafkaChannel channel = entry.getKey();
                 if (!explicitlyMutedChannels.contains(channel)) {
                     Deque<NetworkReceive> deque = entry.getValue();
+                    // 注意对每个Channel只从deque里取一个networkReceive
                     addToCompletedReceives(channel, deque);
                     if (deque.isEmpty())
                         iter.remove();

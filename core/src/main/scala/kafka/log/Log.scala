@@ -749,7 +749,7 @@ class Log(@volatile var dir: File,
           messageOffset = appendInfo.firstOffset,
           segmentBaseOffset = segment.baseOffset,
           relativePositionInSegment = segment.size)
-
+        // 向active的segment写入数据
         segment.append(firstOffset = appendInfo.firstOffset,
           largestOffset = appendInfo.lastOffset,
           largestTimestamp = appendInfo.maxTimestamp,

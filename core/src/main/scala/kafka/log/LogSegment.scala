@@ -140,7 +140,7 @@ class LogSegment private[log] (val log: FileRecords,
         maxTimestampSoFar = largestTimestamp
         offsetOfMaxTimestamp = shallowOffsetOfMaxTimestamp
       }
-      // append an entry to the index (if needed)
+      // append an entry to the index (if needed) 判断达到固定间隔就创建一条索引记录（稀疏索引），这里使用的mmap
       if(bytesSinceLastIndexEntry > indexIntervalBytes) {
         offsetIndex.append(firstOffset, physicalPosition)
         timeIndex.maybeAppend(maxTimestampSoFar, offsetOfMaxTimestamp)
@@ -227,12 +227,15 @@ class LogSegment private[log] (val log: FileRecords,
     if (adjustedMaxSize == 0)
       return FetchDataInfo(offsetMetadata, MemoryRecords.EMPTY)
 
+    // 计算读取的长度
     // calculate the length of the message set to read based on whether or not they gave us a maxOffset
     val fetchSize: Int = maxOffset match {
       case None =>
+        // 副本同步时的计算方式
         // no max offset, just read until the max position
         min((maxPosition - startPosition).toInt, adjustedMaxSize)
       case Some(offset) =>
+        // consumer拉取时的计算方式
         // there is a max offset, translate it to a file position and use that to calculate the max read size;
         // when the leader of a partition changes, it's possible for the new leader's high watermark to be less than the
         // true high watermark in the previous leader for a short window. In this window, if a consumer fetches on an
@@ -248,6 +251,7 @@ class LogSegment private[log] (val log: FileRecords,
         min(min(maxPosition, endPosition) - startPosition, adjustedMaxSize).toInt
     }
 
+    // 根据起始的物理位置和读取长度读取数据文件
     FetchDataInfo(offsetMetadata, log.read(startPosition, fetchSize),
       firstEntryIncomplete = adjustedMaxSize < startOffsetAndSize.size)
   }

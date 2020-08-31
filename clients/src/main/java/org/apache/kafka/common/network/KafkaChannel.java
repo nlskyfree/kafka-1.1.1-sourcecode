@@ -192,8 +192,9 @@ public class KafkaChannel {
         if (receive == null) {
             receive = new NetworkReceive(maxReceiveSize, id, memoryPool);
         }
-
+        // 从channel里读取数据
         receive(receive);
+        // 如果读完了，形成一个完整的Request
         if (receive.complete()) {
             receive.payload().rewind();
             result = receive;
