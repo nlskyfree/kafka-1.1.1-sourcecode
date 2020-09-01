@@ -237,8 +237,11 @@ public class KafkaChannel {
     }
 
     private boolean send(Send send) throws IOException {
+        // 这里根据不同send，实际底层API不同，如RecordsSend底层使用了零拷贝，而ByteBufferSend使用正常channel write
         send.writeTo(transportLayer);
+        // 是否完成，通过读到的字节数是否达到request的前4个字节对应的大小
         if (send.completed())
+            // 发送完成，则注销OP_WRITE事件
             transportLayer.removeInterestOps(SelectionKey.OP_WRITE);
 
         return send.completed();

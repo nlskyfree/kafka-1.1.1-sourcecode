@@ -52,8 +52,9 @@ public class RecordsSend implements Send {
     @Override
     public long writeTo(GatheringByteChannel channel) throws IOException {
         long written = 0;
-
+        // 是否未发送完
         if (remaining > 0) {
+            // 发送剩余的bytes
             written = records.writeTo(channel, size() - remaining, remaining);
             if (written < 0)
                 throw new EOFException("Wrote negative bytes to channel. This shouldn't happen.");
