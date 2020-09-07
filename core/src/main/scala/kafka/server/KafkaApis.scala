@@ -100,6 +100,7 @@ class KafkaApis(val requestChannel: RequestChannel,
     try {
       trace(s"Handling request:${request.requestDesc(true)} from connection ${request.context.connectionId};" +
         s"securityProtocol:${request.context.securityProtocol},principal:${request.context.principal}")
+      // facade模式，根据ApiKeys进行请求分发，调用对应的handle*方法进行实际的处理
       request.header.apiKey match {
         case ApiKeys.PRODUCE => handleProduceRequest(request)
         case ApiKeys.FETCH => handleFetchRequest(request)
@@ -375,6 +376,7 @@ class KafkaApis(val requestChannel: RequestChannel,
     val produceRequest = request.body[ProduceRequest]
     val numBytesAppended = request.header.toStruct.sizeOf + request.sizeOfBodyInBytes
 
+    // 当前session的事务请求，幂等请求权限校验，校验失败则返回Exception
     if (produceRequest.isTransactional) {
       if (!authorize(request.session, Write, new Resource(TransactionalId, produceRequest.transactionalId))) {
         sendErrorResponseMaybeThrottle(request, Errors.TRANSACTIONAL_ID_AUTHORIZATION_FAILED.exception)
@@ -391,6 +393,7 @@ class KafkaApis(val requestChannel: RequestChannel,
     val nonExistingTopicResponses = mutable.Map[TopicPartition, PartitionResponse]()
     val authorizedRequestInfo = mutable.Map[TopicPartition, MemoryRecords]()
 
+    // 当前session的写权限校验，并判断topic、partition是否存在，不存在则返回Exception
     for ((topicPartition, memoryRecords) <- produceRequest.partitionRecordsOrFail.asScala) {
       if (!authorize(request.session, Write, new Resource(Topic, topicPartition.topic)))
         unauthorizedTopicResponses += topicPartition -> new PartitionResponse(Errors.TOPIC_AUTHORIZATION_FAILED)
@@ -400,12 +403,13 @@ class KafkaApis(val requestChannel: RequestChannel,
         authorizedRequestInfo += (topicPartition -> memoryRecords)
     }
 
+    // request处理完后，回调此函数发送response
     // the callback for sending a produce response
     def sendResponseCallback(responseStatus: Map[TopicPartition, PartitionResponse]) {
-
+      // 将之间由于异常过滤掉的response和正常处理的response合起来
       val mergedResponseStatus = responseStatus ++ unauthorizedTopicResponses ++ nonExistingTopicResponses
+      // 遍历一遍判断response中是否有异常
       var errorInResponse = false
-
       mergedResponseStatus.foreach { case (topicPartition, status) =>
         if (status.error != Errors.NONE) {
           errorInResponse = true
@@ -419,6 +423,7 @@ class KafkaApis(val requestChannel: RequestChannel,
 
       def produceResponseCallback(bandwidthThrottleTimeMs: Int) {
         if (produceRequest.acks == 0) {
+          // 如果ack=0，代表纯异步，此时客户端不需要response，若在此种状况下request处理出现异常，会关闭连接来通知client
           // no operation needed if producer request.required.acks = 0; however, if there is any error in handling
           // the request, since no response is expected by the producer, the server will close socket server so that
           // the producer client will know that some error has happened and will refresh its metadata
@@ -431,11 +436,14 @@ class KafkaApis(val requestChannel: RequestChannel,
                 s"from client id ${request.header.clientId} with ack=0\n" +
                 s"Topic and partition to exceptions: $exceptionsSummary"
             )
+            // 发送CloseConnectionResponse给网络层，实际由网络层关闭连接
             closeConnection(request, new ProduceResponse(mergedResponseStatus.asJava).errorCounts)
           } else {
+            // 发送None空操作给网络层，网络层收到请求处理完毕unmute channel，因此不需要考虑限流，实际不会发送response
             sendNoOpResponseExemptThrottle(request)
           }
         } else {
+          // 判断是否限流并达到限流阈值，如果是delay再发送response，否则直接发送response
           sendResponseMaybeThrottle(request, requestThrottleMs =>
             new ProduceResponse(mergedResponseStatus.asJava, bandwidthThrottleTimeMs + requestThrottleMs))
         }
@@ -443,7 +451,7 @@ class KafkaApis(val requestChannel: RequestChannel,
 
       // When this callback is triggered, the remote API call has completed
       request.apiRemoteCompleteTimeNanos = time.nanoseconds
-
+      // 判断是否限流并达到限流阈值，如果是delay再调用produceResponseCallback，否则直接执行produceResponseCallback
       quotas.produce.maybeRecordAndThrottle(
         request.session.sanitizedUser,
         request.header.clientId,
@@ -456,7 +464,7 @@ class KafkaApis(val requestChannel: RequestChannel,
         updateRecordsProcessingStats(request, tp, info)
       }
     }
-
+    // 授权通过的request如果为空(都过滤掉了)，无需执行后续逻辑，直接调用sendResponseCallback
     if (authorizedRequestInfo.isEmpty)
       sendResponseCallback(Map.empty)
     else {
@@ -2257,6 +2265,7 @@ class KafkaApis(val requestChannel: RequestChannel,
     // This case is used when the request handler has encountered an error, but the client
     // does not expect a response (e.g. when produce request has acks set to 0)
     requestChannel.updateErrorMetrics(request.header.apiKey, errorCounts.asScala)
+    // 实际网络层关闭的连接
     requestChannel.sendResponse(new RequestChannel.Response(request, None, CloseConnectionAction, None))
   }
 

@@ -593,6 +593,7 @@ class Partition(val topic: String,
   }
 
   def appendRecordsToLeader(records: MemoryRecords, isFromClient: Boolean, requiredAcks: Int = 0): LogAppendInfo = {
+    // 判断当前broker是否为parition的leader所在
     val (info, leaderHWIncremented) = inReadLock(leaderIsrUpdateLock) {
       leaderReplicaIfLocal match {
         case Some(leaderReplica) =>
@@ -600,6 +601,7 @@ class Partition(val topic: String,
           val minIsr = log.config.minInSyncReplicas
           val inSyncSize = inSyncReplicas.size
 
+          // ACK=-1的情况下，若当前的inSyncSize小于minISR，则抛出异常并返回
           // Avoid writing to leader if there are not enough insync replicas to make it safe
           if (inSyncSize < minIsr && requiredAcks == -1) {
             throw new NotEnoughReplicasException("Number of insync replicas for partition %s is [%d], below required minimum [%d]"
@@ -611,7 +613,7 @@ class Partition(val topic: String,
           replicaManager.tryCompleteDelayedFetch(TopicPartitionOperationKey(this.topic, this.partitionId))
           // we may need to increment high watermark since ISR could be down to 1
           (info, maybeIncrementLeaderHW(leaderReplica))
-
+        // 当前broker并不是该partition的leader所在，返回异常
         case None =>
           throw new NotLeaderForPartitionException("Leader not local for partition %s on broker %d"
             .format(topicPartition, localBrokerId))

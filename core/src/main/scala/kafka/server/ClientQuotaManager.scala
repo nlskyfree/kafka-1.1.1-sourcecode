@@ -169,10 +169,12 @@ class ClientQuotaManager(private val config: ClientQuotaManagerConfig,
   def maybeRecordAndThrottle(sanitizedUser: String, clientId: String, value: Double, callback: Int => Unit): Int = {
     if (quotasEnabled) {
       val clientSensors = getOrCreateQuotaSensors(sanitizedUser, clientId)
+      // 判断是否到达限流阈值，达到了delay一段时间在调用callback，否则直接执行
       recordAndThrottleOnQuotaViolation(clientSensors, value, callback)
     } else {
       // Don't record any metrics if quotas are not enabled at any level
       val throttleTimeMs = 0
+      // 不限流直接执行callback
       callback(throttleTimeMs)
       throttleTimeMs
     }
@@ -191,6 +193,7 @@ class ClientQuotaManager(private val config: ClientQuotaManagerConfig,
         val clientMetric = metrics.metrics().get(clientRateMetricName(clientQuotaEntity.sanitizedUser, clientQuotaEntity.clientId))
         throttleTimeMs = throttleTime(clientMetric, getQuotaMetricConfig(clientQuotaEntity.quota)).toInt
         clientSensors.throttleTimeSensor.record(throttleTimeMs)
+        // delay一段时间再调用callback
         // If delayed, add the element to the delayQueue
         delayQueue.add(new ThrottledResponse(time, throttleTimeMs, callback))
         delayQueueSensor.record()

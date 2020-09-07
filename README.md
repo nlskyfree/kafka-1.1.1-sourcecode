@@ -21,4 +21,13 @@ RequestChannel                         //和API层通信的通道层，封装了
   |-- Request                          //传递给API层的Requst
   |-- Response                         //API层返回的Response
 ```   
-#### 2. API层注释：进行中  
+#### 2. API层注释：已完成
+```
+KafkaRequestHandler
+   |-- run()                           //从全局阻塞队列获取网络层组装完的Request，并调用KafkaApi的handle方法
+KafkaApis
+   |-- handle()                        //所有请求的入口，根据ApiKeys分发请求
+```
+#### 3. API.Produce注释：进行中  
+```
+```

@@ -110,6 +110,7 @@ class KafkaRequestHandlerPool(val brokerId: Int,
 
   def createHandler(id: Int): Unit = synchronized {
     runnables += new KafkaRequestHandler(id, brokerId, aggregateIdleMeter, threadPoolSize, requestChannel, apis, time)
+    // daemon模式启动io thread
     KafkaThread.daemon("kafka-request-handler-" + id, runnables(id)).start()
   }
 
@@ -117,11 +118,13 @@ class KafkaRequestHandlerPool(val brokerId: Int,
     val currentSize = threadPoolSize.get
     info(s"Resizing request handler thread pool size from $currentSize to $newSize")
     if (newSize > currentSize) {
+      // 补上差额的线程
       for (i <- currentSize until newSize) {
         createHandler(i)
       }
     } else if (newSize < currentSize) {
       for (i <- 1 to (currentSize - newSize)) {
+        // 关闭部分线程直到达到目标值
         runnables.remove(currentSize - i).stop()
       }
     }
