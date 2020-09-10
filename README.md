@@ -28,6 +28,11 @@ KafkaRequestHandler
 KafkaApis
    |-- handle()                        //所有请求的入口，根据ApiKeys分发请求
 ```
-#### 3. API.Produce注释：进行中  
+##### 2.1 ApiKey.PRODUCE请求：进行中
+```
+
+```
+#### 3. ReplicaManager：进行中
+#### 4. Log：进行中
 ```
 ```
