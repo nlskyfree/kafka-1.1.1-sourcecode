@@ -128,11 +128,14 @@ class LogSegment private[log] (val log: FileRecords,
     if (records.sizeInBytes > 0) {
       trace("Inserting %d bytes at offset %d at position %d with largest timestamp %d at shallow offset %d"
           .format(records.sizeInBytes, firstOffset, log.sizeInBytes(), largestTimestamp, shallowOffsetOfMaxTimestamp))
+      // log本质是FileRecords类，是当前active segment的FileChannel的封装
       val physicalPosition = log.sizeInBytes()
       if (physicalPosition == 0)
         rollingBasedTimestamp = Some(largestTimestamp)
+      // 校验largestOffset是否能转换成与baseoffset的相对值
       // append the messages
       require(canConvertToRelativeOffset(largestOffset), "largest offset in message set can not be safely converted to relative offset.")
+      // 将memoryrecords完全写入pagecache后即返回
       val appendedBytes = log.append(records)
       trace(s"Appended $appendedBytes to ${log.file()} at offset $firstOffset")
       // Update the in memory max timestamp and corresponding offset.
@@ -140,7 +143,8 @@ class LogSegment private[log] (val log: FileRecords,
         maxTimestampSoFar = largestTimestamp
         offsetOfMaxTimestamp = shallowOffsetOfMaxTimestamp
       }
-      // append an entry to the index (if needed) 判断达到固定间隔就创建一条索引记录（稀疏索引），这里使用的mmap
+      // 判断达到固定间隔就创建一条索引记录（稀疏索引），注意：这里索引文件使用了mmap，直接对一块内存操作就可以完成文件写操作
+      // append an entry to the index (if needed)
       if(bytesSinceLastIndexEntry > indexIntervalBytes) {
         offsetIndex.append(firstOffset, physicalPosition)
         timeIndex.maybeAppend(maxTimestampSoFar, offsetOfMaxTimestamp)

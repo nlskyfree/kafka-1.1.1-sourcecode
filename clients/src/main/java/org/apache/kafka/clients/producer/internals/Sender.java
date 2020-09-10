@@ -160,6 +160,7 @@ public class Sender implements Runnable {
         // main loop, runs until close is called
         while (running) {
             try {
+                // 核心逻辑
                 run(time.milliseconds());
             } catch (Exception e) {
                 log.error("Uncaught error in kafka producer I/O thread: ", e);
@@ -234,8 +235,9 @@ public class Sender implements Runnable {
                 transactionManager.authenticationFailed(e);
             }
         }
-
+        // 从accumulator的Deque中取数据，通过client异步发送
         long pollTimeout = sendProducerData(now);
+        // NIO Reactor事件循环，网络事件发生时，处理网络事件
         client.poll(pollTimeout, now);
     }
 
@@ -244,7 +246,7 @@ public class Sender implements Runnable {
 
         // get the list of partitions with data ready to send
         RecordAccumulator.ReadyCheckResult result = this.accumulator.ready(cluster, now);
-
+        // 如果有不知道leader的topic存在，需要发送元数据更新请求
         // if there are any partitions whose leaders are not known yet, force metadata update
         if (!result.unknownLeaderTopics.isEmpty()) {
             // The set of topics with unknown leader contains topics with leader election pending as well as
@@ -258,6 +260,7 @@ public class Sender implements Runnable {
         // remove any nodes we aren't ready to send to
         Iterator<Node> iter = result.readyNodes.iterator();
         long notReadyTimeout = Long.MAX_VALUE;
+        // 确保网络层是通的
         while (iter.hasNext()) {
             Node node = iter.next();
             if (!this.client.ready(node, now)) {
@@ -269,6 +272,7 @@ public class Sender implements Runnable {
         // create produce requests
         Map<Integer, List<ProducerBatch>> batches = this.accumulator.drain(cluster, result.readyNodes,
                 this.maxRequestSize, now);
+        // 如果需要保证顺序性，当次发送需要完成前需要mute该TP的发送，避免网络的乱序到达
         if (guaranteeMessageOrder) {
             // Mute all the partitions drained
             for (List<ProducerBatch> batchList : batches.values()) {
@@ -276,7 +280,7 @@ public class Sender implements Runnable {
                     this.accumulator.mutePartition(batch.topicPartition);
             }
         }
-
+        // 处理所有在队列中时间过长导致过期的数据
         List<ProducerBatch> expiredBatches = this.accumulator.expiredBatches(this.requestTimeout, now);
         // Reset the producer id if an expired batch has previously been sent to the broker. Also update the metrics
         // for expired batches. see the documentation of @TransactionState.resetProducerId to understand why
@@ -306,6 +310,7 @@ public class Sender implements Runnable {
             // otherwise the select time will be the time difference between now and the metadata expiry time;
             pollTimeout = 0;
         }
+        //
         sendProduceRequests(batches, now);
 
         return pollTimeout;
@@ -663,7 +668,7 @@ public class Sender implements Runnable {
             if (batch.magic() < minUsedMagic)
                 minUsedMagic = batch.magic();
         }
-
+        // 注意这里的List里的batch每个TP一定不一定，因为drain时只会取每个TP队列队列末的一个batch
         for (ProducerBatch batch : batches) {
             TopicPartition tp = batch.topicPartition;
             MemoryRecords records = batch.records();

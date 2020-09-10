@@ -474,7 +474,7 @@ class ReplicaManager(val config: KafkaConfig,
                   result.info.lastOffset + 1, // required offset
                   new PartitionResponse(result.error, result.info.firstOffset, result.info.logAppendTime, result.info.logStartOffset)) // response status
       }
-
+      // 回调状态统计信息更新函数
       processingStatsCallback(localProduceResults.mapValues(_.info.recordsProcessingStats))
       // 如果ack为-1，并且有数据写入本地log成功，需要等待副本操作完成，则向时间轮提交延迟任务DelayedProduce，等待副本同步完成或超时后才返回response
       if (delayedProduceRequestRequired(requiredAcks, entriesPerPartition, localProduceResults)) {

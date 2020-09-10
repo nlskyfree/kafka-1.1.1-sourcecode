@@ -458,7 +458,7 @@ class KafkaApis(val requestChannel: RequestChannel,
         numBytesAppended,
         produceResponseCallback)
     }
-
+    // 数据写入完成后更新一些状态统计信息
     def processingStatsCallback(processingStats: Map[TopicPartition, RecordsProcessingStats]): Unit = {
       processingStats.foreach { case (tp, info) =>
         updateRecordsProcessingStats(request, tp, info)

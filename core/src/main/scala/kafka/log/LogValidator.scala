@@ -207,7 +207,7 @@ private[kafka] object LogValidator extends Logging {
 
       if (batch.magic >= RecordBatch.MAGIC_VALUE_V2)
         batch.setPartitionLeaderEpoch(partitionLeaderEpoch)
-      // 记录batch的最大时间戳，默认取broker写入时间
+      // 记录batch的最大时间戳，默认取client的消息创建时间
       if (batch.magic > RecordBatch.MAGIC_VALUE_V0) {
         if (timestampType == TimestampType.LOG_APPEND_TIME)
           batch.setMaxTimestamp(TimestampType.LOG_APPEND_TIME, now)
