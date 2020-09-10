@@ -204,7 +204,7 @@ class Log(@volatile var dir: File,
    * prevent the log start offset (which is exposed in fetch responses) from getting ahead of the high watermark.
    */
   @volatile private var replicaHighWatermark: Option[Long] = None
-
+  // key为baseoffset，value为segment
   /* the actual segments of the log */
   private val segments: ConcurrentNavigableMap[java.lang.Long, LogSegment] = new ConcurrentSkipListMap[java.lang.Long, LogSegment]
 
@@ -640,23 +640,31 @@ class Log(@volatile var dir: File,
    */
   private def append(records: MemoryRecords, isFromClient: Boolean, assignOffsets: Boolean, leaderEpoch: Int): LogAppendInfo = {
     maybeHandleIOException(s"Error while appending records to $topicPartition in dir ${dir.getParent}") {
+      // Batch size校验，CRC校验计算，判断写入压缩算法（或不压缩，取客户端压缩算法）
       val appendInfo = analyzeAndValidateRecords(records, isFromClient = isFromClient)
 
       // return if we have no valid messages or if this is a duplicate of the last appended entry
       if (appendInfo.shallowCount == 0)
         return appendInfo
-
+      // 什么时候会发生？字节数和消息体传递的size不一致，需要截断
       // trim any invalid bytes or partial messages before appending it to the on-disk log
       var validRecords = trimInvalidBytes(records, appendInfo)
 
       // they are valid, insert them in the log
       lock synchronized {
+        // 校验index文件的mmap是否被关闭
         checkIfMemoryMappedBufferClosed()
+        // leader写的时候assignOffsets=true，follower拉取时为false
+        // 一条消息的message是在partition的leader中管理的，follower会直接使用leader赋予的offset
         if (assignOffsets) {
+          // 取当前segment的下一个offset作为起始offset创建offset counter
           // assign offsets to the message set
           val offset = new LongRef(nextOffsetMetadata.messageOffset)
+          // 设置为消息集的第一个offset
           appendInfo.firstOffset = offset.value
           val now = time.milliseconds
+          // 1. batch、record校验
+          // 2. 为每条消息使用offset counter赋offset，用系统当前时间now赋时间戳
           val validateAndOffsetAssignResult = try {
             LogValidator.validateMessagesAndAssignOffsets(validRecords,
               offset,
@@ -680,7 +688,7 @@ class Log(@volatile var dir: File,
           appendInfo.recordsProcessingStats = validateAndOffsetAssignResult.recordsProcessingStats
           if (config.messageTimestampType == TimestampType.LOG_APPEND_TIME)
             appendInfo.logAppendTime = now
-
+          // 由于重新压缩、消息版本转换的原因，batch大小可能发生变化，这里需要重新校验下batch大小
           // re-validate message sizes if there's a possibility that they have changed (due to re-compression or message
           // format conversion)
           if (validateAndOffsetAssignResult.messageSizeMaybeChanged) {
@@ -731,6 +739,7 @@ class Log(@volatile var dir: File,
 
         // now that we have valid records, offsets assigned, and timestamps updated, we need to
         // validate the idempotent/transactional state of the producers and collect some metadata
+        // idempotent/transactional如果开启，会缓存5个batch用于去重，若发现重复直接返回
         val (updatedProducers, completedTxns, maybeDuplicate) = analyzeAndValidateProducerState(validRecords, isFromClient)
         maybeDuplicate.foreach { duplicate =>
           appendInfo.firstOffset = duplicate.firstOffset
@@ -739,7 +748,7 @@ class Log(@volatile var dir: File,
           appendInfo.logStartOffset = logStartOffset
           return appendInfo
         }
-
+        // 获取active的segment，若满足滚动条件，会产生新的segment返回
         // maybe roll the log if this segment is full
         val segment = maybeRoll(messagesSize = validRecords.sizeInBytes,
           maxTimestampInMessages = appendInfo.maxTimestamp,
@@ -761,21 +770,21 @@ class Log(@volatile var dir: File,
           producerAppendInfo.maybeCacheTxnFirstOffsetMetadata(logOffsetMetadata)
           producerStateManager.update(producerAppendInfo)
         }
-
+        // 事务相关
         // update the transaction index with the true last stable offset. The last offset visible
         // to consumers using READ_COMMITTED will be limited by this value and the high watermark.
         for (completedTxn <- completedTxns) {
           val lastStableOffset = producerStateManager.completeTxn(completedTxn)
           segment.updateTxnIndex(completedTxn, lastStableOffset)
         }
-
+        // 事务相关
         // always update the last producer id map offset so that the snapshot reflects the current offset
         // even if there isn't any idempotent data being written
         producerStateManager.updateMapEndOffset(appendInfo.lastOffset + 1)
-
+        // 更新LEO
         // increment the log end offset
         updateLogEndOffset(appendInfo.lastOffset + 1)
-
+        // 更新LSO，事务相关
         // update the first unstable offset (which is used to compute LSO)
         updateFirstUnstableOffset()
 
@@ -783,7 +792,7 @@ class Log(@volatile var dir: File,
           s"first offset: ${appendInfo.firstOffset}, " +
           s"next offset: ${nextOffsetMetadata.messageOffset}, " +
           s"and messages: $validRecords")
-
+        // 默认Long.MAX_VALUE，可配置没有刷盘的条数积累到多少条就自动flush执行fsync到磁盘，官方建议不开启依赖pagecache自己刷
         if (unflushedMessages >= config.flushInterval)
           flush()
 
@@ -886,7 +895,7 @@ class Log(@volatile var dir: File,
     var monotonic = true
     var maxTimestamp = RecordBatch.NO_TIMESTAMP
     var offsetOfMaxTimestamp = -1L
-
+    // records包含多个batch，对每个batch做校验
     for (batch <- records.batches.asScala) {
       // we only validate V2 and higher to avoid potential compatibility issues with older clients
       if (batch.magic >= RecordBatch.MAGIC_VALUE_V2 && isFromClient && batch.baseOffset != 0)
@@ -1395,10 +1404,12 @@ class Log(@volatile var dir: File,
    */
   def flush(offset: Long) : Unit = {
     maybeHandleIOException(s"Error while flushing log for $topicPartition in dir ${dir.getParent} with offset $offset") {
+      // recoveryPoint为第一条没flush到磁盘的消息
       if (offset <= this.recoveryPoint)
         return
       debug(s"Flushing log up to offset $offset, last flushed: $lastFlushTime,  current time: ${time.milliseconds()}, " +
         s"unflushed: $unflushedMessages")
+      // 遍历recoveryPoint到offset的所有segment，执行flush
       for (segment <- logSegments(this.recoveryPoint, offset))
         segment.flush()
 

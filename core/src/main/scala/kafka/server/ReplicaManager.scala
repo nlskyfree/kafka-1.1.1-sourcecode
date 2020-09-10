@@ -744,6 +744,7 @@ class ReplicaManager(val config: KafkaConfig,
           val partitionOpt = getPartition(topicPartition)
           val info = partitionOpt match {
             case Some(partition) =>
+              // 判断该Partition是否offline
               if (partition eq ReplicaManager.OfflinePartition)
                 throw new KafkaStorageException(s"Partition $topicPartition is in an offline log directory on broker $localBrokerId")
               // 写入leader

@@ -57,6 +57,7 @@ private[kafka] object LogValidator extends Logging {
                                                       timestampDiffMaxMs: Long,
                                                       partitionLeaderEpoch: Int,
                                                       isFromClient: Boolean): ValidationAndOffsetAssignResult = {
+    // 没压缩的情况
     if (sourceCodec == NoCompressionCodec && targetCodec == NoCompressionCodec) {
       // check the magic value
       if (!records.hasMatchingMagic(magic))
@@ -179,13 +180,17 @@ private[kafka] object LogValidator extends Logging {
     val initialOffset = offsetCounter.value
 
     for (batch <- records.batches.asScala) {
+      // 每个batch做校验
       validateBatch(batch, isFromClient, magic)
 
       var maxBatchTimestamp = RecordBatch.NO_TIMESTAMP
       var offsetOfMaxBatchTimestamp = -1L
 
       for (record <- batch.asScala) {
+        // 每条record校验
         validateRecord(batch, record, now, timestampType, timestampDiffMaxMs, compactedTopic)
+        // 给每条消息赋offset
+        // 注意这里的counter并不是线程安全的，getAndIncrement只是++的封装而已
         val offset = offsetCounter.getAndIncrement()
         if (batch.magic > RecordBatch.MAGIC_VALUE_V0 && record.timestamp > maxBatchTimestamp) {
           maxBatchTimestamp = record.timestamp
@@ -197,12 +202,12 @@ private[kafka] object LogValidator extends Logging {
         maxTimestamp = maxBatchTimestamp
         offsetOfMaxTimestamp = offsetOfMaxBatchTimestamp
       }
-
+      // batch的最后一条消息的offset设置
       batch.setLastOffset(offsetCounter.value - 1)
 
       if (batch.magic >= RecordBatch.MAGIC_VALUE_V2)
         batch.setPartitionLeaderEpoch(partitionLeaderEpoch)
-
+      // 记录batch的最大时间戳，默认取broker写入时间
       if (batch.magic > RecordBatch.MAGIC_VALUE_V0) {
         if (timestampType == TimestampType.LOG_APPEND_TIME)
           batch.setMaxTimestamp(TimestampType.LOG_APPEND_TIME, now)

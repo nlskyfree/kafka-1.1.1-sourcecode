@@ -65,14 +65,14 @@ public class FileRecords extends AbstractRecords implements Closeable {
         this.end = end;
         this.isSlice = isSlice;
         this.size = new AtomicInteger();
-
+        // 说明这个FileRecords只是表示文件的一部分，而不是整体
         if (isSlice) {
             // don't check the file size if this is just a slice view
             size.set(end - start);
         } else {
             int limit = Math.min((int) channel.size(), end);
             size.set(limit - start);
-
+            // seek到文件末
             // if this is not a slice, update the file pointer to the end of the file
             // set the file position to the last byte in the file
             channel.position(limit);
