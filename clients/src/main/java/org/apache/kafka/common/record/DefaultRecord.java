@@ -168,7 +168,7 @@ public class DefaultRecord implements Record {
     public Header[] headers() {
         return headers;
     }
-
+    // 写入一条消息，这里其实就是按照v2消息格式写入
     /**
      * Write the record to `out` and return its size.
      */
@@ -179,49 +179,60 @@ public class DefaultRecord implements Record {
                               ByteBuffer value,
                               Header[] headers) throws IOException {
         int sizeInBytes = sizeOfBodyInBytes(offsetDelta, timestampDelta, key, value, headers);
+        // var int，参考了protocol buffer的变长整形编码，数值小时，可以省空间（也可能浪费）
         ByteUtils.writeVarint(sizeInBytes, out);
-
+        // 1个字节属性
         byte attributes = 0; // there are no used record attributes at the moment
         out.write(attributes);
-
+        // var long时间戳偏移量
         ByteUtils.writeVarlong(timestampDelta, out);
+        // var int offset偏移量，注意这里的offset并不是真正的offset，真正的offset只有broker端才能生成
         ByteUtils.writeVarint(offsetDelta, out);
-
+        // 空key，用-1存储
         if (key == null) {
             ByteUtils.writeVarint(-1, out);
         } else {
             int keySize = key.remaining();
+            // var int key大小
             ByteUtils.writeVarint(keySize, out);
+            // 写入key
             Utils.writeTo(out, key, keySize);
         }
-
+        // 空value，用-1存储
         if (value == null) {
             ByteUtils.writeVarint(-1, out);
         } else {
             int valueSize = value.remaining();
+            // var int value大小
             ByteUtils.writeVarint(valueSize, out);
+            // 写入value
             Utils.writeTo(out, value, valueSize);
         }
 
         if (headers == null)
             throw new IllegalArgumentException("Headers cannot be null");
-
+        // var int heads个数
         ByteUtils.writeVarint(headers.length, out);
-
+        // 写入head
         for (Header header : headers) {
             String headerKey = header.key();
             if (headerKey == null)
                 throw new IllegalArgumentException("Invalid null header key found in headers");
 
             byte[] utf8Bytes = Utils.utf8(headerKey);
+            // var int head key大小
             ByteUtils.writeVarint(utf8Bytes.length, out);
+            // 写入head key
             out.write(utf8Bytes);
 
             byte[] headerValue = header.value();
             if (headerValue == null) {
+                // value为空，写入-1
                 ByteUtils.writeVarint(-1, out);
             } else {
+                // var int head value大小
                 ByteUtils.writeVarint(headerValue.length, out);
+                // 写入head value
                 out.write(headerValue);
             }
         }

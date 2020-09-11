@@ -122,7 +122,7 @@ public class MemoryRecordsBuilder {
         this.writeLimit = writeLimit;
         this.initialPosition = bufferStream.position();
         this.batchHeaderSizeInBytes = AbstractRecords.recordBatchHeaderSizeInBytes(magic, compressionType);
-
+        // 提前预留出batch record的头的位置，batch close时会写入batch头
         bufferStream.position(initialPosition + batchHeaderSizeInBytes);
         this.bufferStream = bufferStream;
         this.appendStream = new DataOutputStream(compressionType.wrapForOutput(this.bufferStream, magic));
@@ -314,6 +314,7 @@ public class MemoryRecordsBuilder {
             buffer().position(initialPosition);
             builtRecords = MemoryRecords.EMPTY;
         } else {
+            // 写batch头
             if (magic > RecordBatch.MAGIC_VALUE_V1)
                 this.actualCompressionRatio = (float) writeDefaultBatchHeader() / this.uncompressedRecordsSizeInBytes;
             else if (compressionType != CompressionType.NONE)
@@ -624,9 +625,14 @@ public class MemoryRecordsBuilder {
     private void appendDefaultRecord(long offset, long timestamp, ByteBuffer key, ByteBuffer value,
                                      Header[] headers) throws IOException {
         ensureOpenForRecordAppend();
+        // baseOffset=0，offset为MemroyRecords创建时初始化为baseoffset，然后每次写入一条record+1
+        // 本质这里就是batch中每条记录从0-n赋一个相对offset
         int offsetDelta = (int) (offset - baseOffset);
+        // firstTimestamp为batch中第一条消息的时间
         long timestampDelta = timestamp - firstTimestamp;
+        // 根据v2消息协议，写入record
         int sizeInBytes = DefaultRecord.writeTo(appendStream, offsetDelta, timestampDelta, key, value, headers);
+        // 更新一些变量，如numRecords、lastoffset、maxTimestamp
         recordWritten(offset, timestamp, sizeInBytes);
     }
 

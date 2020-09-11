@@ -44,10 +44,11 @@ public class MemoryRecords extends AbstractRecords {
     public static final MemoryRecords EMPTY = MemoryRecords.readableRecords(ByteBuffer.allocate(0));
 
     private final ByteBuffer buffer;
-
+    // 根据Producer客户端代码，MemoryRecordsBuilder产生的MemoryRecords只会包含一个RecordBatch，为啥这里要用迭代器？为了扩展性吗？
     private final Iterable<MutableRecordBatch> batches = new Iterable<MutableRecordBatch>() {
         @Override
         public Iterator<MutableRecordBatch> iterator() {
+            // 内部封装了如何根据Kafka消息格式消费Buffer中的字节数据
             return new RecordBatchIterator<>(new ByteBufferLogInputStream(buffer.duplicate(), Integer.MAX_VALUE));
         }
     };

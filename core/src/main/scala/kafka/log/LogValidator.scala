@@ -189,7 +189,6 @@ private[kafka] object LogValidator extends Logging {
       for (record <- batch.asScala) {
         // 每条record校验
         validateRecord(batch, record, now, timestampType, timestampDiffMaxMs, compactedTopic)
-        // 给每条消息赋offset
         // 注意这里的counter并不是线程安全的，getAndIncrement只是++的封装而已
         val offset = offsetCounter.getAndIncrement()
         if (batch.magic > RecordBatch.MAGIC_VALUE_V0 && record.timestamp > maxBatchTimestamp) {

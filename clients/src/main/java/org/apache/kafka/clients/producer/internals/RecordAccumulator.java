@@ -208,6 +208,7 @@ public final class RecordAccumulator {
             byte maxUsableMagic = apiVersions.maxUsableProduceMagic();
             int size = Math.max(this.batchSize, AbstractRecords.estimateSizeInBytesUpperBound(maxUsableMagic, compression, key, value, headers));
             log.trace("Allocating a new {} byte message buffer for topic {} partition {}", size, tp.topic(), tp.partition());
+            // 从bufferpool里分配内存，给batch用来存储数据，batch会封装成ByteBufferOutputStream，写入时通过流写入bytebuffer
             buffer = free.allocate(size, maxTimeToBlock);
             synchronized (dq) {
                 // Need to check if producer is closed again after grabbing the dequeue lock.
@@ -589,6 +590,7 @@ public final class RecordAccumulator {
 
                                             transactionManager.addInFlightBatch(batch);
                                         }
+                                        // batch关闭，不会再添加record，此时写入batch头
                                         batch.close();
                                         // 更新当次待发送的request大小
                                         size += batch.records().sizeInBytes();

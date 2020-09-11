@@ -726,6 +726,7 @@ class ReplicaManager(val config: KafkaConfig,
                                entriesPerPartition: Map[TopicPartition, MemoryRecords],
                                requiredAcks: Short): Map[TopicPartition, LogAppendResult] = {
     trace(s"Append [$entriesPerPartition] to local log")
+    // 一次request可能包含多个TP的memoryReocds，每个memoryRecords对应Producer的一个ProduceBatch
     // 遍历每个topicPartition，records为对应的数据
     entriesPerPartition.map { case (topicPartition, records) =>
       // 一些监控指标统计
