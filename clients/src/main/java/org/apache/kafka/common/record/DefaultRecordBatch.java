@@ -344,14 +344,16 @@ public class DefaultRecordBatch extends AbstractRecordBatch implements MutableRe
 
     @Override
     public void setMaxTimestamp(TimestampType timestampType, long maxTimestamp) {
+        // 以broker配置的timestamp为最后写入的timestamp
         long currentMaxTimestamp = maxTimestamp();
         // We don't need to recompute crc if the timestamp is not updated.
         if (timestampType() == timestampType && currentMaxTimestamp == maxTimestamp)
             return;
-
+        // timestampType变了，得重新设置batch属性
         byte attributes = computeAttributes(compressionType(), timestampType, isTransactional(), isControlBatch());
         buffer.putShort(ATTRIBUTES_OFFSET, attributes);
         buffer.putLong(MAX_TIMESTAMP_OFFSET, maxTimestamp);
+        // 得重新计算crc校验码
         long crc = computeChecksum();
         ByteUtils.writeUnsignedInt(buffer, CRC_OFFSET, crc);
     }

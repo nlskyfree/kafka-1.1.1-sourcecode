@@ -640,7 +640,7 @@ class Log(@volatile var dir: File,
    */
   private def append(records: MemoryRecords, isFromClient: Boolean, assignOffsets: Boolean, leaderEpoch: Int): LogAppendInfo = {
     maybeHandleIOException(s"Error while appending records to $topicPartition in dir ${dir.getParent}") {
-      // Batch size校验，CRC校验计算，判断写入压缩算法（或不压缩，取客户端压缩算法）
+      // Batch size校验，CRC校验计算，判断客户端、服务端压缩算法
       val appendInfo = analyzeAndValidateRecords(records, isFromClient = isFromClient)
 
       // return if we have no valid messages or if this is a duplicate of the last appended entry
@@ -664,7 +664,8 @@ class Log(@volatile var dir: File,
           appendInfo.firstOffset = offset.value
           val now = time.milliseconds
           // 1. batch、record校验
-          // 2. 为每条消息使用offset counter赋offset，用系统当前时间now赋时间戳
+          // 2. 设置batch的基准偏移，可能调整时间戳，改变压缩方式，重新计算crc校验位
+          // 其实就是校验 + 消息格式转换成Topic对应的消息格式 + 压缩转换成broker的压缩方式
           val validateAndOffsetAssignResult = try {
             LogValidator.validateMessagesAndAssignOffsets(validRecords,
               offset,
@@ -681,6 +682,7 @@ class Log(@volatile var dir: File,
           } catch {
             case e: IOException => throw new KafkaException("Error in validating messages while appending to log '%s'".format(name), e)
           }
+          // LogValidator可能会改变MemoryRecords的内容，这里需要重新赋值
           validRecords = validateAndOffsetAssignResult.validatedRecords
           appendInfo.maxTimestamp = validateAndOffsetAssignResult.maxTimestamp
           appendInfo.offsetOfMaxTimestamp = validateAndOffsetAssignResult.shallowOffsetOfMaxTimestamp

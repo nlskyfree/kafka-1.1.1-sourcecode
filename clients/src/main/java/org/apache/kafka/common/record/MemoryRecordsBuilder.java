@@ -125,6 +125,7 @@ public class MemoryRecordsBuilder {
         // 提前预留出batch record的头的位置，batch close时会写入batch头
         bufferStream.position(initialPosition + batchHeaderSizeInBytes);
         this.bufferStream = bufferStream;
+        // 可以看出v2消息中，整个Records部分都会被压缩
         this.appendStream = new DataOutputStream(compressionType.wrapForOutput(this.bufferStream, magic));
     }
 

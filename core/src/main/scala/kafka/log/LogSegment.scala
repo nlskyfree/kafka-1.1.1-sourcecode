@@ -62,6 +62,7 @@ class LogSegment private[log] (val log: FileRecords,
 
   def shouldRoll(messagesSize: Int, maxTimestampInMessages: Long, maxOffsetInMessages: Long, now: Long): Boolean = {
     val reachedRollMs = timeWaitedForRoll(now, maxTimestampInMessages) > maxSegmentMs - rollJitterMs
+    // canConvertToRelativeOffset说明相对offset的最大取值为Integer.MAX_VALUE
     size > maxSegmentBytes - messagesSize ||
       (size > 0 && reachedRollMs) ||
       offsetIndex.isFull || timeIndex.isFull || !canConvertToRelativeOffset(maxOffsetInMessages)

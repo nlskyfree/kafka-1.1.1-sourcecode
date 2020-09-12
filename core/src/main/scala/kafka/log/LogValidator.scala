@@ -60,6 +60,7 @@ private[kafka] object LogValidator extends Logging {
     // 没压缩的情况
     if (sourceCodec == NoCompressionCodec && targetCodec == NoCompressionCodec) {
       // check the magic value
+      // 消息版本转换，如果batch对应的版本与topic对应的消息magic不符，转换成topic对应的magic消息版本
       if (!records.hasMatchingMagic(magic))
         convertAndAssignOffsetsNonCompressed(records, offsetCounter, compactedTopic, time, now, timestampType,
           timestampDiffMaxMs, magic, partitionLeaderEpoch, isFromClient)
@@ -68,6 +69,7 @@ private[kafka] object LogValidator extends Logging {
         assignOffsetsNonCompressed(records, offsetCounter, now, compactedTopic, timestampType, timestampDiffMaxMs,
           partitionLeaderEpoch, isFromClient, magic)
     } else {
+      // 压缩的情况
       validateMessagesAndAssignOffsetsCompressed(records, offsetCounter, time, now, sourceCodec, targetCodec, compactedTopic,
         magic, timestampType, timestampDiffMaxMs, partitionLeaderEpoch, isFromClient)
     }
@@ -201,7 +203,7 @@ private[kafka] object LogValidator extends Logging {
         maxTimestamp = maxBatchTimestamp
         offsetOfMaxTimestamp = offsetOfMaxBatchTimestamp
       }
-      // batch的最后一条消息的offset设置
+      // 实际是设置batch的baseoffset，也就是first offset
       batch.setLastOffset(offsetCounter.value - 1)
 
       if (batch.magic >= RecordBatch.MAGIC_VALUE_V2)
@@ -291,7 +293,7 @@ private[kafka] object LogValidator extends Logging {
           validatedRecords += record
         }
       }
-
+      // inPlaceAssignment 标志了是否可以不用产生新的MemoryRecords
       if (!inPlaceAssignment) {
         val (producerId, producerEpoch, sequence, isTransactional) = {
           // note that we only reassign offsets for requests coming straight from a producer. For records with magic V2,
@@ -300,6 +302,7 @@ private[kafka] object LogValidator extends Logging {
           val first = records.batches.asScala.head
           (first.producerId, first.producerEpoch, first.baseSequence, first.isTransactional)
         }
+        // 重新压缩，生成新的MemoryRecords，性能损耗较大
         buildRecordsAndAssignOffsets(toMagic, offsetCounter, time, timestampType, CompressionType.forId(targetCodec.codec), now,
           validatedRecords, producerId, producerEpoch, sequence, isTransactional, partitionLeaderEpoch, isFromClient,
           uncompressedSizeInBytes)
