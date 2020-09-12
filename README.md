@@ -30,7 +30,7 @@ KafkaApis
    |-- handle()                        //所有请求的入口，根据ApiKeys分发请求
 ```
 ##### 2.1 ApiKey.PRODUCE请求：已完成
-TODO：1.没有加上事务、幂等处理的注释  2.延迟任务，时间轮这块也没有注释，比较复杂，可放入单独章节 3. 索引文件的逻辑没有详细注释
+TODO：1.没有加上事务、幂等处理的注释  2.延迟任务，时间轮 3. 索引文件的逻辑没有详细注释 4、权限设计，这几块也没有注释，比较复杂，可放入单独章节 
 ```
 KafkaApis
    |--handleProduceRequest()           //API入口，主要对session进行权限校验，调用replicaManager.appendRecords写入数据

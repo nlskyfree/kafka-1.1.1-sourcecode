@@ -810,8 +810,11 @@ class ReplicaManager(val config: KafkaConfig,
                     quota: ReplicaQuota = UnboundedQuota,
                     responseCallback: Seq[(TopicPartition, FetchPartitionData)] => Unit,
                     isolationLevel: IsolationLevel) {
+    // 判断请求是来自consumer还是follower数据同步，来自consumer的值为-1
     val isFromFollower = Request.isValidBrokerId(replicaId)
+    // 正常模式都是走leader消费数据，为true，不会从follower消费。FutureLocalReplicaId ？ 不清楚什么时候走这个逻辑
     val fetchOnlyFromLeader = replicaId != Request.DebuggingConsumerId && replicaId != Request.FutureLocalReplicaId
+    // consumer请求，只消费HW以内的数据，即“committed”数据，follower同步则不然
     val fetchOnlyCommitted = !isFromFollower && replicaId != Request.FutureLocalReplicaId
 
     def readFromLog(): Seq[(TopicPartition, LogReadResult)] = {

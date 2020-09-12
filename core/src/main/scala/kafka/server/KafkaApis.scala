@@ -490,6 +490,7 @@ class KafkaApis(val requestChannel: RequestChannel,
   /**
    * Handle a fetch request
    */
+  // 1. 客户端consumer fetch 2. follower fetch同步数据
   def handleFetchRequest(request: RequestChannel.Request) {
     val versionId = request.header.apiVersion
     val clientId = request.header.clientId
@@ -564,7 +565,7 @@ class KafkaApis(val requestChannel: RequestChannel,
 
       }.getOrElse(data)
     }
-
+    // Request处理完后，返回Response给网络层的回调函数
     // the callback for process a fetch response, invoked before throttling
     def processResponseCallback(responsePartitionData: Seq[(TopicPartition, FetchPartitionData)]) {
       val partitions = new util.LinkedHashMap[TopicPartition, FetchResponse.PartitionData]
