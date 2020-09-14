@@ -163,6 +163,26 @@ class LogSegment private[log] (val log: FileRecords,
     }
   }
 
+  /**
+    * Find the physical file position for the first message with offset >= the requested offset.
+    *
+    * The startingFilePosition argument is an optimization that can be used if we already know a valid starting position
+    * in the file higher than the greatest-lower-bound from the index.
+    *
+    * @param offset The offset we want to translate
+    * @param startingFilePosition A lower bound on the file position from which to begin the search. This is purely an optimization and
+    * when omitted, the search will begin at the position in the offset index.
+    * @return The position in the log storing the message with the least offset >= the requested offset and the size of the
+    *        message or null if no message meets this criteria.
+    */
+  @threadsafe
+  private[log] def translateOffset(offset: Long, startingFilePosition: Int = 0): LogOffsetPosition = {
+    // 返回小于等于offset的最大的offset的索引条目，即稀疏索引先缩小范围，此时物理位置不准确
+    val mapping = offsetIndex.lookup(offset)
+    // 从大概的物理位置查找，知道找到包含targetOffset的batch，返回batch的offset、物理偏移、batch大小
+    log.searchForOffsetWithSize(offset, max(mapping.position, startingFilePosition))
+  }
+
   private def updateProducerState(producerStateManager: ProducerStateManager, batch: RecordBatch): Unit = {
     if (batch.hasProducerId) {
       val producerId = batch.producerId
@@ -175,24 +195,6 @@ class LogSegment private[log] (val log: FileRecords,
       }
     }
     producerStateManager.updateMapEndOffset(batch.lastOffset + 1)
-  }
-
-  /**
-   * Find the physical file position for the first message with offset >= the requested offset.
-   *
-   * The startingFilePosition argument is an optimization that can be used if we already know a valid starting position
-   * in the file higher than the greatest-lower-bound from the index.
-   *
-   * @param offset The offset we want to translate
-   * @param startingFilePosition A lower bound on the file position from which to begin the search. This is purely an optimization and
-   * when omitted, the search will begin at the position in the offset index.
-   * @return The position in the log storing the message with the least offset >= the requested offset and the size of the
-    *        message or null if no message meets this criteria.
-   */
-  @threadsafe
-  private[log] def translateOffset(offset: Long, startingFilePosition: Int = 0): LogOffsetPosition = {
-    val mapping = offsetIndex.lookup(offset)
-    log.searchForOffsetWithSize(offset, max(mapping.position, startingFilePosition))
   }
 
   /**
@@ -215,6 +217,7 @@ class LogSegment private[log] (val log: FileRecords,
       throw new IllegalArgumentException("Invalid max size for log read (%d)".format(maxSize))
 
     val logSize = log.sizeInBytes // this may change, need to save a consistent copy
+    // 找到startOffset对应的batch的物理位置与batch的大小
     val startOffsetAndSize = translateOffset(startOffset)
 
     // if the start position is already off the end of the log, return null
@@ -223,7 +226,7 @@ class LogSegment private[log] (val log: FileRecords,
 
     val startPosition = startOffsetAndSize.position
     val offsetMetadata = new LogOffsetMetadata(startOffset, this.baseOffset, startPosition)
-
+    // minOneMessage代表至少读一条数据，就算超过maxSize
     val adjustedMaxSize =
       if (minOneMessage) math.max(maxSize, startOffsetAndSize.size)
       else maxSize
@@ -232,31 +235,36 @@ class LogSegment private[log] (val log: FileRecords,
     if (adjustedMaxSize == 0)
       return FetchDataInfo(offsetMetadata, MemoryRecords.EMPTY)
 
-    // 计算读取的长度
+    // 计算实际需要从磁盘物理读取的字节
     // calculate the length of the message set to read based on whether or not they gave us a maxOffset
     val fetchSize: Int = maxOffset match {
       case None =>
-        // 副本同步时的计算方式
+        // 副本同步时，maxOffset为空，maxPosition即segment的大小，如此计算可以读取的大小
         // no max offset, just read until the max position
         min((maxPosition - startPosition).toInt, adjustedMaxSize)
       case Some(offset) =>
-        // consumer拉取时的计算方式
+        // consumer拉取时，
         // there is a max offset, translate it to a file position and use that to calculate the max read size;
         // when the leader of a partition changes, it's possible for the new leader's high watermark to be less than the
         // true high watermark in the previous leader for a short window. In this window, if a consumer fetches on an
         // offset between new leader's high watermark and the log end offset, we want to return an empty response.
         if (offset < startOffset)
           return FetchDataInfo(offsetMetadata, MemoryRecords.EMPTY, firstEntryIncomplete = false)
+        // 再查找最大的offset的物理位置
         val mapping = translateOffset(offset, startPosition)
         val endPosition =
           if (mapping == null)
+            // 没找到也取当前段大小
             logSize // the max offset is off the end of the log, use the end of the file
           else
+            // 找到了取其物理位置,注意这个offset是不包含在结果集中的
             mapping.position
+        // 计算读取大小
         min(min(maxPosition, endPosition) - startPosition, adjustedMaxSize).toInt
     }
 
-    // 根据起始的物理位置和读取长度读取数据文件
+    // 注意：这里没发生物理读取，只是生成了一个FileRecords的slice
+    // 实际在网络层才发生真正的物理IO，因为需要完成零拷贝，不会实际读到用户态内存中，将磁盘IO直接拷贝到网络IO流上
     FetchDataInfo(offsetMetadata, log.read(startPosition, fetchSize),
       firstEntryIncomplete = adjustedMaxSize < startOffsetAndSize.size)
   }

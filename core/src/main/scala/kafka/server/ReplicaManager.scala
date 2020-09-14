@@ -839,7 +839,7 @@ class ReplicaManager(val config: KafkaConfig,
     val bytesReadable = logReadResultValues.map(_.info.records.sizeInBytes).sum
     val errorReadingData = logReadResultValues.foldLeft(false) ((errorIncurred, readResult) =>
       errorIncurred || (readResult.error != Errors.NONE))
-
+    // 数据写入完成后，判断是直接返回Response，还是创建延迟请求，在延迟任务中返回
     // respond immediately if 1) fetch request does not want to wait
     //                        2) fetch request does not require any data
     //                        3) has enough data to respond
@@ -849,6 +849,7 @@ class ReplicaManager(val config: KafkaConfig,
         tp -> FetchPartitionData(result.error, result.highWatermark, result.leaderLogStartOffset, result.info.records,
           result.lastStableOffset, result.info.abortedTransactions)
       }
+      // 执行回调函数，返回Response给网络层
       responseCallback(fetchPartitionData)
     } else {
       // construct the fetch results from the read results
@@ -883,8 +884,9 @@ class ReplicaManager(val config: KafkaConfig,
                        readPartitionInfo: Seq[(TopicPartition, PartitionData)],
                        quota: ReplicaQuota,
                        isolationLevel: IsolationLevel): Seq[(TopicPartition, LogReadResult)] = {
-
+    // 对每个TopicPartition执行以下逻辑
     def read(tp: TopicPartition, fetchInfo: PartitionData, limitBytes: Int, minOneMessage: Boolean): LogReadResult = {
+      // 从此offset开始读取
       val offset = fetchInfo.fetchOffset
       val partitionFetchSize = fetchInfo.maxBytes
       val followerLogStartOffset = fetchInfo.logStartOffset
@@ -908,7 +910,7 @@ class ReplicaManager(val config: KafkaConfig,
           Some(localReplica.lastStableOffset.messageOffset)
         else
           None
-
+        // 如果是READ_COMMITTED，最大offset读取到LSO
         // decide whether to only fetch committed data (i.e. messages below high watermark)
         val maxOffsetOpt = if (readOnlyCommitted)
           Some(lastStableOffset.getOrElse(initialHighWatermark))
@@ -989,7 +991,9 @@ class ReplicaManager(val config: KafkaConfig,
 
     var limitBytes = fetchMaxBytes
     val result = new mutable.ArrayBuffer[(TopicPartition, LogReadResult)]
+    // API版本兼容参数，versionId<2，hardMaxBytesLimit=true
     var minOneMessage = !hardMaxBytesLimit
+    // 遍历所有需要读取的TopicPartition，执行读取操作
     readPartitionInfo.foreach { case (tp, fetchInfo) =>
       val readResult = read(tp, fetchInfo, limitBytes, minOneMessage)
       val recordBatchSize = readResult.info.records.sizeInBytes

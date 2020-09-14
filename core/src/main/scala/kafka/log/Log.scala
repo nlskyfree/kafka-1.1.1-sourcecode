@@ -1016,13 +1016,13 @@ class Log(@volatile var dir: File,
         return FetchDataInfo(currentNextOffsetMetadata, MemoryRecords.EMPTY, firstEntryIncomplete = false,
           abortedTransactions = abortedTransactions)
       }
-
+      // floorEntry返回跳表中小于等于startOffset的Entry
       var segmentEntry = segments.floorEntry(startOffset)
-
+      // 校验下startOffset是否在合理范围内[logStartOffset, next]，其实就是Log对应的目录内所有segment的offset最小-最大值
       // return error on attempt to read beyond the log end offset or read below log start offset
       if (startOffset > next || segmentEntry == null || startOffset < logStartOffset)
         throw new OffsetOutOfRangeException("Request for offset %d but we only have log segments in the range %d to %d.".format(startOffset, logStartOffset, next))
-
+      // 从segmentEntry开始读取，找不到数据，取下一个segment
       // Do the read on the segment with a base offset less than the target offset
       // but if that segment doesn't contain any messages with an offset greater than that
       // continue to read from successive segments until we get some messages or we reach the end of the log
@@ -1033,7 +1033,9 @@ class Log(@volatile var dir: File,
         // the message is appended but before the nextOffsetMetadata is updated. In that case the second fetch may
         // cause OffsetOutOfRangeException. To solve that, we cap the reading up to exposed position instead of the log
         // end of the active segment.
+        // 没理解上面的注释，总而言之，这里maxPosition取segment文件末或nextOffsetMetadata在segment中的物理位置
         val maxPosition = {
+          // lastEntry代表为当前active segment
           if (segmentEntry == segments.lastEntry) {
             val exposedPos = nextOffsetMetadata.relativePositionInSegment.toLong
             // Check the segment again in case a new segment has just rolled out.
@@ -1046,7 +1048,9 @@ class Log(@volatile var dir: File,
             segment.size
           }
         }
+        // 根据这几个值，计算物理的读取范围
         val fetchInfo = segment.read(startOffset, maxOffset, maxLength, maxPosition, minOneMessage)
+        // 从此segment没读到数据，取下一个segment
         if (fetchInfo == null) {
           segmentEntry = segments.higherEntry(segmentEntry.getKey)
         } else {

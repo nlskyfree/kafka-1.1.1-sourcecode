@@ -580,6 +580,7 @@ class KafkaApis(val requestChannel: RequestChannel,
 
       // fetch response callback invoked after any throttling
       def fetchResponseCallback(bandwidthThrottleTimeMs: Int) {
+        // 创建FetchResponse
         def createResponse(requestThrottleTimeMs: Int): FetchResponse = {
           val convertedData = new util.LinkedHashMap[TopicPartition, FetchResponse.PartitionData]
           unconvertedFetchResponse.responseData().asScala.foreach { case (tp, partitionData) =>
@@ -601,8 +602,10 @@ class KafkaApis(val requestChannel: RequestChannel,
           s"metadata=${unconvertedFetchResponse.sessionId()}")
 
         if (fetchRequest.isFromFollower)
+          // 从follower来的流量不用限流
           sendResponseExemptThrottle(request, createResponse(0))
         else
+          // 从客户端来的流量可能限流
           sendResponseMaybeThrottle(request, requestThrottleMs => createResponse(requestThrottleMs))
       }
 
@@ -636,7 +639,7 @@ class KafkaApis(val requestChannel: RequestChannel,
         fetchRequest.minBytes,
         fetchRequest.maxBytes,
         versionId <= 2,
-        interesting,
+        interesting,           //描述了希望从哪些TopicPartition获得哪些数据
         replicationQuota(fetchRequest),
         processResponseCallback,
         fetchRequest.isolationLevel)
